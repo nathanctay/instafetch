@@ -25,7 +25,7 @@ heck yes—here’s a tight, implementation-ready design doc for your project:
 2. **Digest**: Receive a **daily or weekly** email with new posts since last digest.
 3. **Instant alerts (optional)**: For a subset, get a heads-up within ~15 min of a new post.
 4. **Browse**: View latest posts per account in the web app.
-5. **Manage**: Pause a source, change frequency, remove sources.
+5. **Manage**: Pause a account, change frequency, remove accounts.
 
 ---
 
@@ -48,15 +48,15 @@ instafetch/
 
 ### Backend responsibilities (Hono)
 
-* REST API (sources, posts, settings)
+* REST API (accounts, posts, settings)
 * Scrape orchestration (call provider, normalize, store)
 * Digest builder (HTML email from templates)
-* Cron tasks (check sources, send digests)
+* Cron tasks (check accounts, send digests)
 
 ### Frontend responsibilities (React)
 
-* Manage sources (add/remove/pause)
-* Show latest posts per source
+* Manage accounts (add/remove/pause)
+* Show latest posts per account
 * Settings (frequency: daily/weekly; toggle instant alerts)
 * Auth (optional/simple gate)
 
@@ -69,7 +69,7 @@ instafetch/
 import { sqliteTable, text, integer, blob, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // Minimal single-user now; add users table later if needed.
-export const sources = sqliteTable("sources", {
+export const accounts = sqliteTable("accounts", {
   id: text("id").primaryKey(),                 // uuid
   handle: text("handle").notNull(),            // "natgeo"
   url: text("url").notNull(),                  // canonical profile URL
@@ -78,12 +78,12 @@ export const sources = sqliteTable("sources", {
   lastCheckedAt: integer("last_checked_at", { mode: "timestamp_ms" }),
   lastShortcode: text("last_shortcode")        // most recent seen; sanity fence
 }, (t) => ({
-  handleIdx: uniqueIndex("idx_sources_handle").on(t.handle)
+  handleIdx: uniqueIndex("idx_accounts_handle").on(t.handle)
 }));
 
 export const posts = sqliteTable("posts", {
   id: text("id").primaryKey(),                 // uuid
-  sourceId: text("source_id").notNull(),       // fk -> sources.id
+  accountId: text("account_id").notNull(),       // fk -> accounts.id
   shortcode: text("shortcode").notNull(),      // IG post id in URL
   caption: text("caption"),
   publishedAt: integer("published_at", { mode: "timestamp_ms" }).notNull(),
@@ -161,16 +161,16 @@ interface InstagramFetcher {
 **Base URL:** `/api`
 
 * `GET /health` → `"ok"`
-* **Sources**
+* **accounts**
 
-  * `GET /sources` → list
-  * `POST /sources` `{ handleOrUrl }` → resolves handle + canonical URL; inserts source (status=active)
-  * `PATCH /sources/:id` `{ status? }` → pause/resume
-  * `DELETE /sources/:id`
-  * `POST /sources/:id/refresh` → enqueue immediate fetch (rate-limited)
+  * `GET /accounts` → list
+  * `POST /accounts` `{ handleOrUrl }` → resolves handle + canonical URL; inserts account (status=active)
+  * `PATCH /accounts/:id` `{ status? }` → pause/resume
+  * `DELETE /accounts/:id`
+  * `POST /accounts/:id/refresh` → enqueue immediate fetch (rate-limited)
 * **Posts**
 
-  * `GET /sources/:id/posts?cursor=&limit=&since=` → paginated posts
+  * `GET /accounts/:id/posts?cursor=&limit=&since=` → paginated posts
   * `GET /posts/:shortcode` → single post (by shortcode)
 * **Settings**
 
@@ -190,9 +190,9 @@ interface InstagramFetcher {
 ### Route map
 
 ```
-/             → Dashboard (recent posts across sources)
-/sources      → List sources (add/remove/pause)
-/sources/:id  → Source detail (posts, last checked, refresh button)
+/             → Dashboard (recent posts across accounts)
+/accounts      → List accounts (add/remove/pause)
+/accounts/:id  → account detail (posts, last checked, refresh button)
 /settings     → Digest frequency, instant alerts
 ```
 
@@ -200,15 +200,15 @@ interface InstagramFetcher {
 
 * **TanStack Query** for all API calls:
 
-  * Keys: `['sources']`, `['posts', sourceId, params]`, `['settings']`
+  * Keys: `['accounts']`, `['posts', accountId, params]`, `['settings']`
   * Simple stale times (e.g., 30–60s on posts)
-* **Mutations**: add source, delete source, patch settings → invalidate relevant queries
+* **Mutations**: add account, delete account, patch settings → invalidate relevant queries
 * **Search params**: pagination on list pages (page/limit) via React Router `useSearchParams`
 
 ### Components
 
-* `AddSourceDialog` (validates handle/URL with Zod; previews resolved handle)
-* `SourceCard` (status chip: active/paused/error; lastChecked)
+* `AddaccountDialog` (validates handle/URL with Zod; previews resolved handle)
+* `accountCard` (status chip: active/paused/error; lastChecked)
 * `PostGrid` (media thumbnails, caption; link to IG)
 * `SettingsForm` (radio daily/weekly; instantAlerts toggle)
 
@@ -218,19 +218,19 @@ interface InstagramFetcher {
 
 ### Periodic fetch
 
-* **Every 30–60 minutes**: for each active source:
+* **Every 30–60 minutes**: for each active account:
 
   1. Call `fetchLatest(handle, since=lastCheckedAt - buffer)`
   2. Normalize to `posts` & `media`; **dedupe on `shortcode`**
   3. Update `lastCheckedAt`, `lastShortcode`
-  4. (If instant alerts enabled) send small email for new items from “priority” sources (optional)
+  4. (If instant alerts enabled) send small email for new items from “priority” accounts (optional)
 
 ### Digest send
 
 * **Daily @ 7am** or **Weekly (Sun @ 7am)**
 
   1. Query posts in period `[lastDigestSentAt, now)`
-  2. Compose HTML (grouped by source)
+  2. Compose HTML (grouped by account)
   3. Send email; persist `digests` row
 
 > Implementation: in-process cron with Bun (`setInterval`/light cron lib) or system cron curling `/api/tasks/*`. For personal scale, no Redis/queues needed.
@@ -239,9 +239,9 @@ interface InstagramFetcher {
 
 ## 8) Rate Limits, Errors, & Resilience
 
-* **Per-source backoff** on 4xx/5xx from provider.
+* **Per-account backoff** on 4xx/5xx from provider.
 * **Global cap** (e.g., max 10 profiles, max 200 fetches/day).
-* **Circuit breaker**: if a source fails N times, set `status=error` and surface in UI.
+* **Circuit breaker**: if a account fails N times, set `status=error` and surface in UI.
 * **Idempotency**: upsert posts by `shortcode`.
 
 ---
@@ -251,7 +251,7 @@ interface InstagramFetcher {
 * Store **provider tokens** only in server env.
 * Minimal PII (your email only).
 * “Do not fetch” list (manually configurable).
-* **Purge flow**: delete all stored posts/media for any source you remove.
+* **Purge flow**: delete all stored posts/media for any account you remove.
 
 ---
 
@@ -311,7 +311,7 @@ VITE_API_BASE_URL=http://localhost:3000/api
 ## 12) Testing
 
 * **Unit**: Provider adapter (maps raw → `FetchedPost[]`), normalizers, email renderer.
-* **Integration**: Add source → fetch → posts visible → digest composed.
+* **Integration**: Add account → fetch → posts visible → digest composed.
 * **E2E smoke**: Start both apps; seed a test handle; run a manual fetch; verify a post shows in UI.
 
 ---
@@ -320,9 +320,9 @@ VITE_API_BASE_URL=http://localhost:3000/api
 
 **MVP (Day 1–2)**
 
-* Add/remove source
+* Add/remove account
 * Manual “fetch now”
-* List posts per source
+* List posts per account
 * Daily digest (single recipient)
 
 **v0.2**
@@ -333,14 +333,14 @@ VITE_API_BASE_URL=http://localhost:3000/api
 
 **v0.3**
 
-* Instant alerts (select per source)
+* Instant alerts (select per account)
 * Pagination/search on posts
-* Export/import sources JSON
+* Export/import accounts JSON
 
 **v0.4 (nice-to-haves)**
 
 * Playwright fallback adapter
-* Drag-n-drop source ordering
+* Drag-n-drop account ordering
 * Simple auth wall (passcode)
 
 ---
@@ -357,7 +357,7 @@ VITE_API_BASE_URL=http://localhost:3000/api
       </mj-column>
     </mj-section>
 
-    {{#each sources}}
+    {{#each accounts}}
     <mj-section>
       <mj-column>
         <mj-text font-weight="700">@{{handle}}</mj-text>
@@ -403,4 +403,4 @@ For **instafetch**, this plan keeps your toolchain lean, portable, and affordabl
 * Resend/SES for email
 * In-process cron for fetch & digest
 
-If you want, I can generate the initial repo skeleton (files + minimal code) exactly to this spec so you can `bun run dev` and start adding sources immediately.
+If you want, I can generate the initial repo skeleton (files + minimal code) exactly to this spec so you can `bun run dev` and start adding accounts immediately.
