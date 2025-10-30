@@ -1,0 +1,20 @@
+{
+  "name": "instafetch",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run -A dev:all",
+    "dev:all": "bunx concurrently -r \"bun --cwd apps/api dev\" \"bun --cwd apps/web dev\""
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
