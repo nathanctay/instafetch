@@ -1,5 +1,3 @@
-heck yes—here’s a tight, implementation-ready design doc for your project:
-
 # instafetch — Project Design Document (Personal Edition)
 
 ## 0) Goal & Constraints
@@ -15,13 +13,11 @@ heck yes—here’s a tight, implementation-ready design doc for your project:
   * **Email:** Resend or Amazon SES
   * **Scheduling:** In-process cron (Bun) or OS cron, no Redis queue initially
 
-> Note on scraping: even for personal use, keep it respectful—low rate limits, delete on request, and avoid private accounts.
-
 ---
 
 ## 1) Core User Stories
 
-1. **Add account**: Enter a public @handle or profile URL to follow.
+1. **Add account**: Enter a public handle or profile URL to follow.
 2. **Digest**: Receive a **daily or weekly** email with new posts since last digest.
 3. **Instant alerts (optional)**: For a subset, get a heads-up within ~15 min of a new post.
 4. **Browse**: View latest posts per account in the web app.
@@ -66,57 +62,107 @@ instafetch/
 
 ```ts
 // schema.ts (SQLite)
-import { sqliteTable, text, integer, blob, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, integer, sqliteTable, text, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
+import { relations } from "drizzle-orm";
 
 // Minimal single-user now; add users table later if needed.
 export const accounts = sqliteTable("accounts", {
-  id: text("id").primaryKey(),                 // uuid
-  handle: text("handle").notNull(),            // "natgeo"
-  url: text("url").notNull(),                  // canonical profile URL
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  status: text("status").notNull().default("active"), // active|paused|error
-  lastCheckedAt: integer("last_checked_at", { mode: "timestamp_ms" }),
-  lastShortcode: text("last_shortcode")        // most recent seen; sanity fence
-}, (t) => ({
-  handleIdx: uniqueIndex("idx_accounts_handle").on(t.handle)
-}));
+    id: text("id").primaryKey(), // uuid
+    handle: text("handle").notNull(),
+    url: text("url").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().$default(() => new Date()),
+    status: text("status", { enum: ["active", "paused", "error"] }).notNull().default("active"),
+    lastCheckedAt: integer("last_checked_at", { mode: "timestamp_ms" }),
+    lastShortcode: text("last_shortcode")
+}, (t) => (
+    [uniqueIndex("idx_accounts_handle").on(t.handle)]
+));
 
 export const posts = sqliteTable("posts", {
-  id: text("id").primaryKey(),                 // uuid
-  accountId: text("account_id").notNull(),       // fk -> accounts.id
-  shortcode: text("shortcode").notNull(),      // IG post id in URL
-  caption: text("caption"),
-  publishedAt: integer("published_at", { mode: "timestamp_ms" }).notNull(),
-  likeCount: integer("like_count"),
-  commentCount: integer("comment_count"),
-  raw: blob("raw"),                             // JSON string or compressed
-}, (t) => ({
-  shortcodeIdx: uniqueIndex("idx_posts_shortcode").on(t.shortcode)
-}));
+    id: text("id").primaryKey(),                 // uuid
+    accountId: text("account_id").notNull()      // Added foreign key
+        .references(() => accounts.id, { onDelete: "cascade" }),
+    shortcode: text("shortcode").notNull(),
+    caption: text("caption"),
+    publishedAt: integer("published_at", { mode: "timestamp_ms" }).notNull(),
+    raw: blob("raw"),
+}, (t) => ([
+    // Composite index: ensures shortcode is unique *per account*
+    uniqueIndex("idx_posts_account_shortcode").on(t.accountId, t.shortcode)
+]));
 
 export const media = sqliteTable("media", {
-  id: text("id").primaryKey(),                 // uuid
-  postId: text("post_id").notNull(),           // fk -> posts.id
-  kind: text("kind").notNull(),                // image|video|carousel
-  url: text("url").notNull(),                  // CDN url from provider
-  width: integer("width"),
-  height: integer("height"),
-  thumbUrl: text("thumb_url")
+    id: text("id").primaryKey(),                 // uuid
+    postId: text("post_id").notNull()           // Added foreign key
+        .references(() => posts.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["image", "video", "carousel"] }).notNull(),
+    url: text("url").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    thumbUrl: text("thumb_url")
 });
 
 export const settings = sqliteTable("settings", {
-  id: integer("id").primaryKey(),              // singleton row (1)
-  digestFrequency: text("digest_frequency").notNull().default("daily"), // daily|weekly
-  instantAlerts: integer("instant_alerts").notNull().default(0) // 0/1
+    // Enforce singleton row (only ID=1)
+    id: integer("id").primaryKey().$default(() => 1).notNull(),
+    digestFrequency: text("digest_frequency", { enum: ["daily", "weekly"] }).notNull().default("daily"), // Correct enum syntax
+    instantAlerts: integer("instant_alerts", { mode: "boolean" }).notNull().default(false) // Changed to boolean
 });
 
 export const digests = sqliteTable("digests", {
-  id: text("id").primaryKey(),
-  sentAt: integer("sent_at", { mode: "timestamp_ms" }).notNull(),
-  periodStart: integer("period_start", { mode: "timestamp_ms" }).notNull(),
-  periodEnd: integer("period_end", { mode: "timestamp_ms" }).notNull(),
-  postIdsCsv: text("post_ids_csv").notNull()   // simple for SQLite; or join table if you prefer
+    id: text("id").primaryKey(),
+    sentAt: integer("sent_at", { mode: "timestamp_ms" }).notNull().$default(() => new Date()),
+    periodStart: integer("period_start", { mode: "timestamp_ms" }).notNull(),
+    periodEnd: integer("period_end", { mode: "timestamp_ms" }).notNull(),
 });
+
+// --- Join Table for Digests (Normalization) ---
+export const digestPosts = sqliteTable("digest_posts", {
+    digestId: text("digest_id").notNull()
+        .references(() => digests.id, { onDelete: "cascade" }),
+    postId: text("post_id").notNull()
+        .references(() => posts.id, { onDelete: "set null" }), // 'set null' so if a post is deleted, the digest isn't deleted
+}, (t) => ([
+    // Primary key to ensure a post is only in a digest once
+    primaryKey({ columns: [t.digestId, t.postId] })
+]));
+
+// --- Relations ---
+
+export const accountsRelations = relations(accounts, ({ many }) => ({
+    posts: many(posts),
+}));
+
+export const postsRelations = relations(posts, ({ one, many }) => ({
+    account: one(accounts, {
+        fields: [posts.accountId],
+        references: [accounts.id],
+    }),
+    media: many(media),
+    digestPosts: many(digestPosts),
+}));
+
+export const mediaRelations = relations(media, ({ one }) => ({
+    post: one(posts, {
+        fields: [media.postId],
+        references: [posts.id],
+    }),
+}));
+
+export const digestsRelations = relations(digests, ({ many }) => ({
+    digestPosts: many(digestPosts),
+}));
+
+export const digestPostsRelations = relations(digestPosts, ({ one }) => ({
+    digest: one(digests, {
+        fields: [digestPosts.digestId],
+        references: [digests.id],
+    }),
+    post: one(posts, {
+        fields: [digestPosts.postId],
+        references: [posts.id],
+    }),
+}));
 ```
 
 ---
@@ -125,7 +171,7 @@ export const digests = sqliteTable("digests", {
 
 ### Scraping Provider (primary)
 
-* **Apify Instagram Scraper** (HTTP API):
+* **TBD** (HTTP API):
 
   * Inputs: username / profile URL, item limit, since timestamp.
   * Outputs: list of posts with caption, timestamp, media URLs, shortcode, stats.
@@ -147,7 +193,7 @@ interface InstagramFetcher {
 }
 ```
 
-* Implementation: `apifyFetcher` + optional `playwrightFetcher` (later, behind a flag).
+* Implementation: `TBD` + optional `playwrightFetcher` (later, behind a flag).
 
 ### Email
 
@@ -161,27 +207,61 @@ interface InstagramFetcher {
 **Base URL:** `/api`
 
 * `GET /health` → `"ok"`
-* **accounts**
+* Here is an updated version of your API design document that reflects all the endpoints, validation, and schema relationships we've built.
 
-  * `GET /accounts` → list
-  * `POST /accounts` `{ handleOrUrl }` → resolves handle + canonical URL; inserts account (status=active)
-  * `PATCH /accounts/:id` `{ status? }` → pause/resume
-  * `DELETE /accounts/:id`
-  * `POST /accounts/:id/refresh` → enqueue immediate fetch (rate-limited)
-* **Posts**
+---
 
-  * `GET /accounts/:id/posts?cursor=&limit=&since=` → paginated posts
-  * `GET /posts/:shortcode` → single post (by shortcode)
-* **Settings**
+## 🌎 API Endpoints
 
-  * `GET /settings`
-  * `PATCH /settings` `{ digestFrequency, instantAlerts }`
+### Accounts
+
+* `GET /accounts` → Lists all accounts.
+* `GET /accounts/:id` → Gets a single account by its UUID.
+* `GET /accounts/:id/posts` → Gets all posts for a specific account.
+* `POST /accounts` `{ handle, url, status? }` → Creates a new account.
+* `PATCH /accounts/:id` `{ handle?, url?, status? }` → Updates an account's details.
+* `DELETE /accounts/:id` → Deletes an account (this will cascade and delete all its posts and media).
+
+
+### Posts
+
+* `GET /posts?page=&limit=` → Gets a paginated list of all posts. Responds with `{ data: [...], meta: { total, page, limit, totalPages } }`.
+* `GET /posts/:id` → Gets a single post by its UUID.
+* `GET /posts/:id/media` → Gets all media for a specific post. Returns a `404` if the *post* doesn't exist, or an empty `[]` if the post exists but has no media.
+* `POST /posts` `{ accountId, shortcode, publishedAt, caption?, raw? }` → Creates a new post. `publishedAt` must be an ISO 8601 timestamp string.
+* `PATCH /posts/:id` `{ shortcode?, publishedAt?, caption?, raw? }` → Updates a post's details.
+* `DELETE /posts/:id` → Deletes a post (this will cascade and delete all its media).
+
+
+### Media
+
+* `GET /media` → Lists all media items in the database.
+* `GET /media/:id` → Gets a single media item by its UUID.
+* **Note:** There are no `POST`, `PATCH`, or `DELETE` endpoints for media. Media is managed "behind the scenes" when a post is created, and it is deleted automatically when its parent post is deleted.
+
+
+### Digests
+
+* `GET /digests` → Lists all digests.
+* `POST /digests` `{ periodStart, periodEnd }` → Creates a new digest. Timestamps must be ISO 8601 strings.
+* `GET /digests/:id` → Gets a single digest, with its related posts nested in the response.
+* `DELETE /digests/:id` → Deletes a digest (this will cascade and delete its relationships from `digestPosts`).
+* `POST /digests/:id/posts` `{ postIds: ["uuid", ...] }` → **Adds** one or more posts to a digest (batch operation).
+* `DELETE /digests/:id/posts` `{ postIds: ["uuid", ...] }` → **Removes** one or more posts from a digest (batch operation).
+
+
+### Settings
+
+* `GET /settings` → Gets the singleton app settings.
+    * **Note:** This is a "get-or-create" endpoint. If no settings row (with `id=1`) exists, it will be created and returned with all default values.
+* `PATCH /settings` `{ digestFrequency?, instantAlerts? }` → Updates the app settings.
+
 * **Admin (optional)**
 
   * `POST /tasks/fetch-all` → manual run of the periodic fetcher
   * `POST /tasks/send-digest` → manual digest send
 
-> Validation with Zod. Return errors as `{ error: { code, message } }`.
+> Validation with Valibot. Return errors as `{ error: { code, message } }`.
 
 ---
 
