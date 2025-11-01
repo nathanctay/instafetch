@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 
 import { db } from '@/db'
-import * as schema from '@/db/schema'
+import { settings } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 
 import * as v from 'valibot';
@@ -15,15 +15,15 @@ const app = new Hono()
 app.get('/', async (c) => {
     try {
         const result = await db.select()
-            .from(schema.settings)
-            .where(eq(schema.settings.id, 1));
+            .from(settings)
+            .where(eq(settings.id, 1));
 
         if (result.length > 0) {
             return c.json(result[0]);
         }
 
         // 3. If NOT found, create it.
-        const newSettings = await db.insert(schema.settings)
+        const newSettings = await db.insert(settings)
             .values({ id: 1 }) // This triggers all other defaults
             .returning();
 
@@ -49,9 +49,9 @@ app.patch(
         }
 
         try {
-            const updatedSettings = await db.update(schema.settings)
+            const updatedSettings = await db.update(settings)
                 .set(validatedData)
-                .where(eq(schema.settings.id, 1))
+                .where(eq(settings.id, 1))
                 .returning()
 
             if (updatedSettings.length === 0) {

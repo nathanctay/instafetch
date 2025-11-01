@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 
 import { db } from '@/db'
-import * as schema from '@/db/schema'
+import { media } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 
 import * as v from 'valibot';
@@ -13,7 +13,7 @@ const app = new Hono()
 
 
 app.get('/', async (c) => {
-    const result = await db.select().from(schema.media)
+    const result = await db.select().from(media)
     return c.json(result)
 })
 
@@ -34,8 +34,8 @@ app.get(
 
         try {
             const result = await db.select()
-                .from(schema.media)
-                .where(eq(schema.media.id, id));
+                .from(media)
+                .where(eq(media.id, id));
 
             if (result.length === 0) {
                 return c.json({ error: 'Media not found' }, 404);

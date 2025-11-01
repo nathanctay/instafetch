@@ -11,6 +11,32 @@ export const validationErrorHandler = (result, c) => {
     }
 };
 
+export const paginationSchema = v.object({
+    page: v.optional(
+        v.pipe(
+            v.string(),
+            v.transform(Number),
+            v.pipe(
+                v.number(),
+                v.minValue(1, "Page must be at least 1")
+            )
+        ),
+        "1"
+    ),
+    limit: v.optional(
+        v.pipe(
+            v.string(),
+            v.transform(Number),
+            v.pipe(
+                v.number(),
+                v.minValue(1, "Limit must be at least 1"),
+                v.maxValue(100, "Limit cannot be more than 100")
+            )
+        ),
+        "20"
+    ),
+})
+
 //accounts
 export const newAccountSchema = v.object({
     handle: v.pipe(
