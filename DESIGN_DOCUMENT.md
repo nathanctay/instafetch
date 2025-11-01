@@ -6,7 +6,7 @@
 * **Scope:** **Personal use**, small scale (your accounts only), single user (can expand later).
 * **Stack (finalized):**
 
-  * **Frontend:** React + **React Router** + TanStack Query + Zod
+  * **Frontend:** React + **Tanstack Router** + TanStack Query + Valibot
   * **Backend:** **Bun + Hono** (TypeScript)
   * **DB:** **Turso (libSQL/SQLite)** + **Drizzle ORM**
   * **Scraping:** Third-party API (e.g., Apify IG scraper) with optional Playwright fallback (later)
@@ -32,10 +32,10 @@
 ```
 instafetch/
 ├─ apps/
-│  ├─ web/   # React (Vite) + React Router + TanStack Query + Zod
+│  ├─ web/   # React (Vite) + Tanstack Router + TanStack Query + Valibot
 │  └─ api/   # Bun + Hono + Drizzle + Turso
 ├─ packages/
-│  ├─ types/ # shared Zod schemas & TS types
+│  ├─ types/ # shared Valibot schemas & TS types
 │  └─ email/ # MJML/Handlebars templates + render helpers
 ├─ infra/    # (optional) deploy scripts, Dockerfiles
 ├─ .env      # non-secret defaults
@@ -265,7 +265,7 @@ interface InstagramFetcher {
 
 ---
 
-## 6) Frontend (React + React Router + TanStack Query)
+## 6) Frontend (React + Tanstack Router + TanStack Query)
 
 ### Route map
 
@@ -283,11 +283,11 @@ interface InstagramFetcher {
   * Keys: `['accounts']`, `['posts', accountId, params]`, `['settings']`
   * Simple stale times (e.g., 30–60s on posts)
 * **Mutations**: add account, delete account, patch settings → invalidate relevant queries
-* **Search params**: pagination on list pages (page/limit) via React Router `useSearchParams`
+* **Search params**: pagination on list pages (page/limit) via Tanstack Router `useSearchParams`
 
 ### Components
 
-* `AddaccountDialog` (validates handle/URL with Zod; previews resolved handle)
+* `AddaccountDialog` (validates handle/URL with Valibot; previews resolved handle)
 * `accountCard` (status chip: active/paused/error; lastChecked)
 * `PostGrid` (media thumbnails, caption; link to IG)
 * `SettingsForm` (radio daily/weekly; instantAlerts toggle)
@@ -478,7 +478,7 @@ VITE_API_BASE_URL=http://localhost:3000/api
 For **instafetch**, this plan keeps your toolchain lean, portable, and affordable:
 
 * Bun + Hono API, Turso + Drizzle DB
-* React + React Router + TanStack Query frontend
+* React + Tanstack Router + TanStack Query frontend
 * Apify (or similar) for scraping
 * Resend/SES for email
 * In-process cron for fetch & digest
